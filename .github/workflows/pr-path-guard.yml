@@ -21,8 +21,19 @@ jobs:
           files: |
             internal/translator/**
       - name: Fail when restricted paths change
-        if: steps.changed-files.outputs.any_changed == 'true'
+        if: >-
+          steps.changed-files.outputs.any_changed == 'true' &&
+          !(github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login == github.repository_owner &&
+            startsWith(github.head_ref, 'vendor-sync/'))
         run: |
           echo "Changes under internal/translator are not allowed in pull requests."
           echo "You need to create an issue for our maintenance team to make the necessary changes."
           exit 1
+      - name: Allow owner vendor sync
+        if: >-
+          steps.changed-files.outputs.any_changed == 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.login == github.repository_owner &&
+          startsWith(github.head_ref, 'vendor-sync/')
+        run: echo "Allowing internal/translator changes from an owner-managed vendor sync."

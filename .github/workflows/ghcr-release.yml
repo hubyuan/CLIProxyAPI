@@ -82,7 +82,7 @@ jobs:
             org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ inputs.version }}
-            org.opencontainers.image.base.name=router-for-me/CLIProxyAPI:v7.2.81
+            org.opencontainers.image.base.name=router-for-me/CLIProxyAPI:v7.2.135
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
