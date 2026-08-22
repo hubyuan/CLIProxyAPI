@@ -77,6 +77,16 @@ type PluginScheduler interface {
 	PickAuth(context.Context, pluginapi.SchedulerPickRequest) (pluginapi.SchedulerPickResponse, bool, error)
 }
 
+// PluginAttemptFailurePolicy decides whether an eligible upstream failure should
+// be retried on the same selected auth before normal auth state is updated.
+type PluginAttemptFailurePolicy interface {
+	DecideAttemptFailure(context.Context, pluginapi.AttemptFailureRequest) (pluginapi.AttemptFailureResponse, bool, error)
+}
+
+type pluginAttemptFailurePolicyState interface {
+	HasAttemptFailurePolicy() bool
+}
+
 type pluginSchedulerState interface {
 	HasScheduler() bool
 }
@@ -126,6 +136,8 @@ type Manager struct {
 	scheduler                 *authScheduler
 	// pluginScheduler runs outside m.mu before falling back to native selection.
 	pluginScheduler PluginScheduler
+	// pluginAttemptFailurePolicy runs synchronously after an eligible upstream attempt fails.
+	pluginAttemptFailurePolicy PluginAttemptFailurePolicy
 	// homeRuntimeAuths retains legacy session auth lookups for non-execution callers.
 	homeRuntimeAuths map[string]map[string]*Auth
 	// homeRuntimeAuthOwners prevents a stale selection from clearing a replacement auth.

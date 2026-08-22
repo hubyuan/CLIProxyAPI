@@ -106,6 +106,9 @@ type Capabilities struct {
 	ResponseAfterTranslator ResponseNormalizer
 	// RequestInterceptor rewrites execution requests before and after credential selection.
 	RequestInterceptor RequestInterceptor
+	// AttemptFailurePolicy decides whether an eligible upstream attempt failure should
+	// be retried on the same selected auth before normal availability state is updated.
+	AttemptFailurePolicy AttemptFailurePolicy
 	// RequestLifecyclePlugin asynchronously receives one terminal event for each request that reached request interception.
 	RequestLifecyclePlugin RequestLifecyclePlugin
 	// ResponseInterceptor rewrites successful non-streaming HTTP execution responses before downstream delivery.
@@ -934,6 +937,38 @@ type ResponseNormalizer interface {
 type RequestInterceptor interface {
 	InterceptRequestBeforeAuth(context.Context, RequestInterceptRequest) (RequestInterceptResponse, error)
 	InterceptRequestAfterAuth(context.Context, RequestInterceptRequest) (RequestInterceptResponse, error)
+}
+
+// AttemptFailurePolicy synchronously decides whether an eligible upstream attempt
+// failure should be retried on the same selected auth.
+type AttemptFailurePolicy interface {
+	DecideAttemptFailure(context.Context, AttemptFailureRequest) (AttemptFailureResponse, error)
+}
+
+// AttemptFailureRequest describes a sanitized upstream attempt failure.
+type AttemptFailureRequest struct {
+	RequestID      string
+	TraceID        string
+	Provider       string
+	AuthID         string
+	Model          string
+	RequestedModel string
+	Stream         bool
+	OutputStarted  bool
+	StatusCode     int
+	ErrorType      string
+	ErrorCode      string
+	ErrorMessage   string
+	RetryAfter     *time.Duration
+	RetryCount     int
+	MaxRetries     int
+	Remaining      time.Duration
+}
+
+// AttemptFailureResponse contains the bounded same-auth retry decision.
+type AttemptFailureResponse struct {
+	RetrySameAuth bool
+	Delay         time.Duration
 }
 
 // RequestLifecyclePlugin receives asynchronous terminal events after execution finishes, fails, is rejected, or is canceled.

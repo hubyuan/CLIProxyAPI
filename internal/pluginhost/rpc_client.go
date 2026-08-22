@@ -115,6 +115,9 @@ func registerRPCPlugin(ctx context.Context, host *Host, id string, client plugin
 	if resp.Capabilities.RequestInterceptor {
 		plugin.Capabilities.RequestInterceptor = adapter
 	}
+	if resp.Capabilities.AttemptFailurePolicy {
+		plugin.Capabilities.AttemptFailurePolicy = adapter
+	}
 	if resp.Capabilities.RequestLifecyclePlugin {
 		plugin.Capabilities.RequestLifecyclePlugin = adapter
 	}
@@ -511,6 +514,15 @@ func (a *rpcPluginAdapter) HandleRequestComplete(ctx context.Context, completion
 		HostCallbackID:    callbackID,
 	})
 	return errCall
+}
+
+func (a *rpcPluginAdapter) DecideAttemptFailure(ctx context.Context, req pluginapi.AttemptFailureRequest) (pluginapi.AttemptFailureResponse, error) {
+	callbackID, closeCallback := a.openHostCallbackContext(ctx)
+	defer closeCallback()
+	return callPlugin[pluginapi.AttemptFailureResponse](ctx, a.client, pluginabi.MethodAttemptFailure, rpcAttemptFailureRequest{
+		AttemptFailureRequest: req,
+		HostCallbackID:        callbackID,
+	})
 }
 
 func (a *rpcPluginAdapter) TranslateResponse(ctx context.Context, req pluginapi.ResponseTransformRequest) (pluginapi.PayloadResponse, error) {

@@ -511,8 +511,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			}
 			startExec := time.Now()
 			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
-			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
-			durationExec := time.Since(startExec)
+			availabilityNeutral := false
 			if errExec != nil {
 				if hasUpstreamExecutionAttempt(errExec) {
 					upstreamErr = errExec
@@ -540,6 +539,14 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					}
 				} else {
 					warnLogUpstreamFailure(execCtx, entry, provider, upstreamModel, auth, durationExec, errExec)
+				}
+			}
+			if errExec != nil {
+				resp, errExec, availabilityNeutral = m.executeWithSameAuthRetry(execCtx, provider, auth, resultModel, routeModel, execOpts, resp, errExec, func() (cliproxyexecutor.Response, error) {
+					return executor.Execute(coreusage.WithAvailabilityNeutralAttempt(execCtx), auth, execReq, execOpts)
+				})
+				if availabilityNeutral && errExec != nil {
+					return cliproxyexecutor.Response{}, errExec
 				}
 			}
 			if errCancel := claudeOAuthRequestCancellation(execCtx, auth, errExec); errCancel != nil {

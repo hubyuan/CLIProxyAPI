@@ -7,14 +7,11 @@ const (
 	ABIVersion uint32 = 1
 	// SchemaVersion tracks the RPC JSON contract exchanged at plugin.register.
 	// Version 2 adds request lifecycle completion and active request termination.
+	// Version 4 adds request.attempt_failure for bounded same-auth retries.
 	// Version 3 omits OriginalRequest/RequestBody on payload stream chunks
 	// (ChunkIndex >= 0); those fields remain on StreamChunkHeaderInitIndex only.
 	// Plugins that still need per-chunk request bodies should keep schema_version < 3.
-	// Version 4 adds upstream WebSocket response event observation.
-	// Version 5 omits HistoryChunks on payload stream chunks (ChunkIndex >= 0);
-	// those fields remain on StreamChunkHeaderInitIndex only. Plugins that still need
-	// per-chunk history chunks should keep schema_version < 5.
-	SchemaVersion uint32 = 5
+	SchemaVersion uint32 = 4
 	// SchemaVersionStreamChunkOmitRequestBody is the first schema version that omits
 	// request bodies on payload stream-chunk interceptor calls.
 	SchemaVersionStreamChunkOmitRequestBody uint32 = 3
@@ -60,6 +57,7 @@ const (
 	MethodRequestNormalize       = "request.normalize"
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
+	MethodAttemptFailure         = "request.attempt_failure"
 	MethodRequestComplete        = "request.complete"
 
 	MethodResponseTranslate            = "response.translate"

@@ -26,6 +26,36 @@ func (m *Manager) SetPluginScheduler(scheduler PluginScheduler) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) SetPluginAttemptFailurePolicy(policy PluginAttemptFailurePolicy) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.pluginAttemptFailurePolicy = policy
+	m.mu.Unlock()
+}
+
+func (m *Manager) attemptFailurePolicy() PluginAttemptFailurePolicy {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	policy := m.pluginAttemptFailurePolicy
+	m.mu.RUnlock()
+	return policy
+}
+
+func (m *Manager) hasPluginAttemptFailurePolicy() bool {
+	policy := m.attemptFailurePolicy()
+	if policy == nil {
+		return false
+	}
+	if state, ok := policy.(pluginAttemptFailurePolicyState); ok {
+		return state.HasAttemptFailurePolicy()
+	}
+	return true
+}
+
 func (m *Manager) hasPluginScheduler() bool {
 	if m == nil {
 		return false

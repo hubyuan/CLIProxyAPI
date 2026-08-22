@@ -1046,6 +1046,7 @@ func validPlugin(plugin pluginapi.Plugin) bool {
 		caps.RequestTranslator != nil ||
 		caps.RequestNormalizer != nil ||
 		caps.RequestInterceptor != nil ||
+		caps.AttemptFailurePolicy != nil ||
 		caps.RequestLifecyclePlugin != nil ||
 		caps.ResponseTranslator != nil ||
 		caps.ResponseBeforeTranslator != nil ||

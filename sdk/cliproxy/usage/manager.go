@@ -80,7 +80,26 @@ type requestedModelAliasContextKey struct{}
 type reasoningEffortContextKey struct{}
 type serviceTierContextKey struct{}
 type generateContextKey struct{}
-type streamContextKey struct{}
+type availabilityNeutralAttemptContextKey struct{}
+
+// WithAvailabilityNeutralAttempt marks an internal retry attempt whose
+// transient 429 failure must not become a duplicate usage failure record.
+func WithAvailabilityNeutralAttempt(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, availabilityNeutralAttemptContextKey{}, true)
+}
+
+// AvailabilityNeutralAttemptFromContext reports whether an executor call is
+// an internal transient-retry attempt.
+func AvailabilityNeutralAttemptFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, _ := ctx.Value(availabilityNeutralAttemptContextKey{}).(bool)
+	return value
+}
 
 // WithRequestedModelAlias stores the client-requested model name for usage sinks.
 func WithRequestedModelAlias(ctx context.Context, alias string) context.Context {

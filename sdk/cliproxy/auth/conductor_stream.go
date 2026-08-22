@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 )
 
 func discardStreamChunks(ch <-chan cliproxyexecutor.StreamChunk) {
@@ -76,6 +77,13 @@ func streamErrorResult(headers http.Header, err error) *cliproxyexecutor.StreamR
 		Headers: cloneHTTPHeader(headers),
 		Chunks:  ch,
 	}
+}
+
+func streamHeaders(result *cliproxyexecutor.StreamResult) http.Header {
+	if result == nil {
+		return nil
+	}
+	return result.Headers
 }
 
 func validateStreamResult(result *cliproxyexecutor.StreamResult, err error) (*cliproxyexecutor.StreamResult, error) {
@@ -271,6 +279,17 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				warnLogUpstreamFailure(ctx, entry, provider, execModel, auth, durationStream, errStream)
 			}
 		}
+		if errStream != nil {
+			attempt := sameAuthStreamAttempt{result: streamResult, err: errStream}
+			attempt, availabilityNeutral := m.executeStreamWithSameAuthRetry(ctx, provider, auth, resultModel, routeModel, execOpts, attempt, func() sameAuthStreamAttempt {
+				retryResult, retryErr := executor.ExecuteStream(coreusage.WithAvailabilityNeutralAttempt(ctx), auth, execReq, execOpts)
+				return sameAuthStreamAttempt{result: retryResult, err: retryErr}
+			})
+			streamResult, errStream = attempt.result, attempt.err
+			if availabilityNeutral && errStream != nil {
+				return nil, newStreamBootstrapError(errStream, streamHeaders(streamResult))
+			}
+		}
 		if !ephemeralResult {
 			if errCancel := claudeOAuthRequestCancellation(ctx, auth, errStream); errCancel != nil {
 				return nil, errCancel
@@ -355,6 +374,25 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			}
 			if hasUpstreamExecutionAttempt(bootstrapErr) {
 				upstreamErr = newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+			}
+		}
+		if bootstrapErr != nil {
+			attempt := sameAuthStreamAttempt{result: streamResult, buffered: buffered, closed: closed, err: bootstrapErr}
+			attempt, availabilityNeutral := m.executeStreamWithSameAuthRetry(ctx, provider, auth, resultModel, routeModel, execOpts, attempt, func() sameAuthStreamAttempt {
+				retryResult, retryErr := executor.ExecuteStream(coreusage.WithAvailabilityNeutralAttempt(ctx), auth, execReq, execOpts)
+				if retryErr != nil {
+					return sameAuthStreamAttempt{result: retryResult, err: retryErr}
+				}
+				retryResult, retryErr = validateStreamResult(retryResult, nil)
+				if retryErr != nil {
+					return sameAuthStreamAttempt{result: retryResult, err: retryErr}
+				}
+				retryBuffered, retryClosed, retryBootstrapErr := readStreamBootstrap(ctx, retryResult.Chunks)
+				return sameAuthStreamAttempt{result: retryResult, buffered: retryBuffered, closed: retryClosed, err: retryBootstrapErr}
+			})
+			streamResult, buffered, closed, bootstrapErr = attempt.result, attempt.buffered, attempt.closed, attempt.err
+			if availabilityNeutral && bootstrapErr != nil {
+				return nil, newStreamBootstrapError(bootstrapErr, streamHeaders(streamResult))
 			}
 		}
 		if !ephemeralResult {

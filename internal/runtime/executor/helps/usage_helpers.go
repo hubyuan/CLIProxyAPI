@@ -312,11 +312,33 @@ func (r *UsageReporter) buildAdditionalModelRecord(model string, detail usage.De
 }
 
 func (r *UsageReporter) PublishFailure(ctx context.Context, errs ...error) {
+	if availabilityNeutralFailure(ctx, errs...) {
+		return
+	}
 	r.publishWithOutcome(ctx, usage.Detail{}, true, failFromErrors(errs...))
 }
 
-func (r *UsageReporter) PublishFailureWithDetail(ctx context.Context, detail usage.Detail, errs ...error) {
-	r.publishWithOutcome(ctx, detail, true, failFromErrors(errs...))
+func availabilityNeutralFailure(ctx context.Context, errs ...error) bool {
+	if !usage.AvailabilityNeutralAttemptFromContext(ctx) || len(errs) == 0 {
+		return false
+	}
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "usage_limit_reached") || strings.Contains(lower, "usage limit") || strings.Contains(lower, "quota") {
+			return false
+		}
+		status := 0
+		if typed, ok := err.(interface{ StatusCode() int }); ok && typed != nil {
+			status = typed.StatusCode()
+		}
+		if status != http.StatusTooManyRequests || (!strings.Contains(lower, "rate limit") && !strings.Contains(lower, "too many requests") && !strings.Contains(lower, "capacity")) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *UsageReporter) TrackFailure(ctx context.Context, errPtr *error) {

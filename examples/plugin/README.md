@@ -14,6 +14,7 @@ This directory contains standard dynamic library plugin examples for the CLIProx
 - `request-translator/`: request translation capability only.
 - `request-normalizer/`: request normalization capability only.
 - `codex-service-tier/`: Go-only request normalizer that sets Codex `gpt-5.5` requests to the priority service tier when enabled.
+- `codex-same-auth-retry/`: Go-only attempt-failure policy that retries eligible Codex `429` failures on the same auth without transferring the request.
 - `request-lifecycle/`: Go-only request admission example with concurrency control, active HTTP termination, and terminal callbacks.
 - `scheduler/`: Go-only scheduler that can select a configured auth ID, delegate to a built-in scheduler, or deny picks.
 - `claude-web-search-router/`: ModelRouter + executor for Claude Code built-in `web_search` (antigravity / codex / xai / Tavily). See `claude-web-search-router/README.md`.
@@ -57,6 +58,21 @@ plugins:
 ```
 
 See `request-lifecycle/README.md` for build instructions and lifecycle semantics.
+
+## Codex Same-Auth Retry
+
+`codex-same-auth-retry` handles transient Codex rate-limit and model-capacity `429` responses by retrying the same selected auth. It never retries after stream output begins and leaves usage/quota exhaustion to the normal account policy.
+
+```yaml
+plugins:
+  configs:
+    codex-same-auth-retry:
+      enabled: true
+      priority: 100
+      delay_ms: 250
+```
+
+The host enforces the five-retry, 30-second request budget. Build it with `make -C examples/plugin build` (the standard target builds every example, including this one), then install `examples/plugin/bin/codex-same-auth-retry-go.so` as a plugin.
 
 ## Host Auth Files Callback
 

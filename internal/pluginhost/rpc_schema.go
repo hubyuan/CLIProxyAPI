@@ -33,6 +33,7 @@ type rpcCapabilities struct {
 	RequestTranslator             bool                         `json:"request_translator"`
 	RequestNormalizer             bool                         `json:"request_normalizer"`
 	RequestInterceptor            bool                         `json:"request_interceptor"`
+	AttemptFailurePolicy          bool                         `json:"attempt_failure_policy"`
 	RequestLifecyclePlugin        bool                         `json:"request_lifecycle_plugin"`
 	ResponseTranslator            bool                         `json:"response_translator"`
 	ResponseBeforeTranslator      bool                         `json:"response_before_translator"`
@@ -88,6 +89,11 @@ type rpcExecutorHTTPRequest struct {
 
 type rpcRequestInterceptRequest struct {
 	pluginapi.RequestInterceptRequest
+	HostCallbackID string `json:"host_callback_id,omitempty"`
+}
+
+type rpcAttemptFailureRequest struct {
+	pluginapi.AttemptFailureRequest
 	HostCallbackID string `json:"host_callback_id,omitempty"`
 }
 
@@ -150,6 +156,7 @@ func rpcCapabilitiesFromPlugin(plugin pluginapi.Plugin) rpcCapabilities {
 		RequestTranslator:             caps.RequestTranslator != nil,
 		RequestNormalizer:             caps.RequestNormalizer != nil,
 		RequestInterceptor:            caps.RequestInterceptor != nil,
+		AttemptFailurePolicy:          caps.AttemptFailurePolicy != nil,
 		RequestLifecyclePlugin:        caps.RequestLifecyclePlugin != nil,
 		ResponseTranslator:            caps.ResponseTranslator != nil,
 		ResponseBeforeTranslator:      caps.ResponseBeforeTranslator != nil,
