@@ -352,6 +352,14 @@ type fallbackRoundTripper struct {
 	fallback  http.RoundTripper
 }
 
+func (f *fallbackRoundTripper) CloseIdleConnections() {
+	for _, roundTripper := range []http.RoundTripper{f.anthropic, f.chrome, f.fallback} {
+		if transport, ok := roundTripper.(interface{ CloseIdleConnections() }); ok {
+			transport.CloseIdleConnections()
+		}
+	}
+}
+
 func (f *fallbackRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if IsAnthropicUpstreamURL(req.URL) {
 		return f.anthropic.RoundTrip(req)
@@ -381,6 +389,9 @@ func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	}
 
 	var chromeRT http.RoundTripper = newUtlsRoundTripper(proxyURL)
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Codex.UpstreamTransport), "pooled") {
+		chromeRT = cachedPooledUtlsRoundTripper(auth, proxyURL)
+	}
 	var anthropicRT http.RoundTripper = cachedClaudeCodeRoundTripper(proxyURL)
 	var standardTransport http.RoundTripper = http.DefaultTransport
 	if proxyURL != "" {
