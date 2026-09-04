@@ -511,6 +511,8 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			}
 			startExec := time.Now()
 			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
+			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
+			durationExec := time.Since(startExec)
 			availabilityNeutral := false
 			if errExec != nil {
 				if hasUpstreamExecutionAttempt(errExec) {

@@ -318,6 +318,14 @@ func (r *UsageReporter) PublishFailure(ctx context.Context, errs ...error) {
 	r.publishWithOutcome(ctx, usage.Detail{}, true, failFromErrors(errs...))
 }
 
+// PublishFailureWithDetail emits the latest observed usage detail together with failure details.
+func (r *UsageReporter) PublishFailureWithDetail(ctx context.Context, detail usage.Detail, errs ...error) {
+	if availabilityNeutralFailure(ctx, errs...) {
+		return
+	}
+	r.publishWithOutcome(ctx, detail, true, failFromErrors(errs...))
+}
+
 func availabilityNeutralFailure(ctx context.Context, errs ...error) bool {
 	if !usage.AvailabilityNeutralAttemptFromContext(ctx) || len(errs) == 0 {
 		return false

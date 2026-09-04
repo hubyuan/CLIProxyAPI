@@ -80,6 +80,7 @@ type requestedModelAliasContextKey struct{}
 type reasoningEffortContextKey struct{}
 type serviceTierContextKey struct{}
 type generateContextKey struct{}
+type streamContextKey struct{}
 type availabilityNeutralAttemptContextKey struct{}
 
 // WithAvailabilityNeutralAttempt marks an internal retry attempt whose
