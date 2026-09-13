@@ -181,6 +181,10 @@ type CodexConfig struct {
 	// ModelLevelCooling scopes Codex usage_limit_reached quota cooldowns to the requested model
 	// rather than cooling down the entire credential across all sibling models.
 	ModelLevelCooling bool `yaml:"model-level-cooling" json:"model-level-cooling"`
+	// UpstreamTransport selects the ChatGPT/Codex HTTP transport. Empty and
+	// dedicated preserve the historical per-request uTLS connection behavior;
+	// pooled reuses account-isolated HTTP/2 connections.
+	UpstreamTransport string `yaml:"upstream-transport" json:"upstream-transport"`
 	// LiveMediaRelay terminates and relays Codex Live WebRTC media in this process.
 	LiveMediaRelay CodexLiveMediaRelayConfig `yaml:"live-media-relay" json:"live-media-relay"`
 }

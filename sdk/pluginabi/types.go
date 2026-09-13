@@ -66,6 +66,7 @@ const (
 	MethodRequestNormalize       = "request.normalize"
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
+	MethodAttemptFailure         = "request.attempt_failure"
 	MethodRequestComplete        = "request.complete"
 
 	MethodResponseTranslate            = "response.translate"

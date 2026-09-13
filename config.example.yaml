@@ -272,6 +272,9 @@ codex:
   # than cooling down the entire credential across all sibling models.
   # Default: false
   model-level-cooling: false
+  # ChatGPT/Codex HTTP transport. Keep dedicated for compatibility; pooled
+  # reuses an account/proxy/host-isolated HTTP/2 connection.
+  upstream-transport: dedicated
   # Terminate and relay Codex Live WebRTC audio and DataChannel traffic in this process.
   # This requires inbound UDP reachability. Keep disabled to preserve direct media behavior.
   live-media-relay:
