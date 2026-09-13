@@ -188,30 +188,82 @@ func generateBillingHeader(cchSigning bool, version, messageText, entrypoint, wo
 	return b.String()
 }
 
+func resolveClaudeContinuityTags(
+	ctx context.Context,
+	auth *cliproxyauth.Auth,
+	incomingHeaders http.Header,
+	payload []byte,
+	confirmedClaudeCode bool,
+	existingPrevReq, existingPromptID string,
+) (prevReq, promptID string, cCtx helps.ClaudeContinuityContext, ok bool) {
+	hasExecutionMetadata := helps.ClaudeExecutionMetadataFromContext(ctx)
+	sessionID := helps.ClaudeSessionIDFromContext(ctx)
+	if sessionID == "" && auth != nil {
+		sessionID = helps.ClaudeAgentSessionUUIDForRequest(incomingHeaders, payload, payload, confirmedClaudeCode)
+	}
+	if sessionID == "" || auth == nil {
+		return "", "", helps.ClaudeContinuityContext{}, false
+	}
+
+	credIdentity := claudeDiagnosticsCredentialIdentity(auth)
+	isNewTurn := helps.IsClaudeNewPromptTurn(payload)
+	continuityKey, seq, prevMsgID, storedPrevReq, storedPromptID := helps.BeginClaudeContinuity(credIdentity, sessionID, isNewTurn, existingPromptID)
+
+	if existingPromptID != "" {
+		promptID = existingPromptID
+	} else if prevMsgID != "" && storedPromptID != "" && (hasExecutionMetadata || !isNewTurn) {
+		promptID = storedPromptID
+	} else if !hasExecutionMetadata {
+		promptID = helps.ClaudeDeterministicPromptID("cpa:prompt:" + claudeBillingFingerprintMessageText(payload))
+	} else {
+		promptID = storedPromptID
+	}
+
+	if (hasExecutionMetadata || existingPrevReq != "") && storedPrevReq != "" {
+		prevReq = storedPrevReq
+	} else {
+		prevReq = existingPrevReq
+	}
+
+	cCtx = helps.ClaudeContinuityContext{
+		Key:         continuityKey,
+		Sequence:    seq,
+		PromptID:    promptID,
+		Initialized: true,
+	}
+	if hasExecutionMetadata || existingPrevReq != "" {
+		cCtx.PreviousMessageID = prevMsgID
+		cCtx.PreviousRequestID = storedPrevReq
+	} else {
+		cCtx.PreviousMessageID = ""
+		cCtx.PreviousRequestID = ""
+	}
+	return prevReq, promptID, cCtx, true
+}
+
 func claudeBillingFingerprintMessageText(payload []byte) string {
-	messageText := ""
-	gjson.GetBytes(payload, "messages").ForEach(func(_, message gjson.Result) bool {
-		if message.Get("role").String() != "user" {
-			return true
-		}
-		content := message.Get("content")
-		candidate := ""
-		if content.Type == gjson.String {
-			candidate = content.String()
-		} else if content.IsArray() {
-			content.ForEach(func(_, part gjson.Result) bool {
-				if part.Get("type").String() == "text" {
-					candidate = part.Get("text").String()
+	idx := firstClaudeUserMessageIndex(payload)
+	if idx < 0 {
+		return ""
+	}
+	content := gjson.GetBytes(payload, fmt.Sprintf("messages.%d.content", idx))
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if content.IsArray() {
+		messageText := ""
+		content.ForEach(func(_, part gjson.Result) bool {
+			if part.Get("type").String() == "text" {
+				text := part.Get("text").String()
+				if !isClaudeCodeCurrentDateReminder(text) && !isClaudeCodeContextReminder(text) {
+					messageText = text
 				}
-				return true
-			})
-		}
-		if candidate != "" {
-			messageText = candidate
-		}
-		return true
-	})
-	return messageText
+			}
+			return true
+		})
+		return messageText
+	}
+	return ""
 }
 
 func claudeCCHFallbackBillingHeader(ctx context.Context, cfg *config.Config, payload []byte, entrypoint string) string {
@@ -305,6 +357,13 @@ func checkSystemInstructionsWithSigningModeAt(
 	if len(forwardedSystemBlocks) == 0 {
 		return injectClaudeCodeCurrentDate(payload, now)
 	}
+	if claudeHistoryHasAdvisorCallOrResult(payload) {
+		for _, block := range forwardedSystemBlocks {
+			systemBlocks = append(systemBlocks, buildTextBlock(block, nil))
+		}
+		payload, _ = sjson.SetRawBytes(payload, "system", []byte("["+strings.Join(systemBlocks, ",")+"]"))
+		return injectClaudeCodeCurrentDate(payload, now)
+	}
 	if claudeUsesLegacySystemReminder(payload) {
 		payload = prependClaudeSystemRemindersToFirstUserMessage(payload, forwardedSystemBlocks)
 	} else {
@@ -334,14 +393,27 @@ func relocateClaudeSystemPromptForCountTokens(payload []byte, strictMode bool) [
 	if !strictMode {
 		forwardedSystemBlocks = collectForwardedClaudeSystemPromptBlocks(system)
 	}
+	if len(forwardedSystemBlocks) == 0 {
+		updated, _ := sjson.DeleteBytes(payload, "system")
+		return updated
+	}
+	if claudeHistoryHasAdvisorCallOrResult(payload) {
+		// When an advisor call or result is present, the Messages path preserves
+		// caller system blocks in top-level system to prevent shifting message
+		// positions. Keep them in top-level system here as well so token counting
+		// remains aligned with the Messages path without splicing messages[].
+		blocks := make([]string, 0, len(forwardedSystemBlocks))
+		for _, block := range forwardedSystemBlocks {
+			blocks = append(blocks, buildTextBlock(block, nil))
+		}
+		updated, _ := sjson.SetRawBytes(payload, "system", []byte("["+strings.Join(blocks, ",")+"]"))
+		return updated
+	}
 	updated, errDelete := sjson.DeleteBytes(payload, "system")
 	if errDelete != nil {
 		return payload
 	}
 	payload = updated
-	if len(forwardedSystemBlocks) == 0 {
-		return payload
-	}
 	if claudeUsesLegacySystemReminder(payload) {
 		return prependClaudeSystemRemindersToFirstUserMessage(payload, forwardedSystemBlocks)
 	}
@@ -619,6 +691,53 @@ func claudeCallerSystemReminder(text string) string {
 	}
 	reminder.WriteString("</system-reminder>")
 	return reminder.String()
+}
+
+// claudeHistoryHasAdvisorCallOrResult reports whether messages contains an advisor
+// tool invocation (server_tool_use / tool_use) or advisor result (advisor_tool_result /
+// advisor_redacted_result). Anthropic cryptographically binds the encrypted
+// advisor result to the conversation layout; any mid-conversation system splice
+// shifts message indices and causes upstream 400 errors.
+func claudeHistoryHasAdvisorCallOrResult(payload []byte) bool {
+	messages := gjson.GetBytes(payload, "messages")
+	if !messages.IsArray() {
+		return false
+	}
+	for _, msg := range messages.Array() {
+		content := msg.Get("content")
+		if content.IsArray() {
+			for _, block := range content.Array() {
+				blockType := block.Get("type").String()
+				switch blockType {
+				case "advisor_tool_result", "advisor_redacted_result":
+					return true
+				case "server_tool_use", "tool_use":
+					if block.Get("name").String() == "advisor" {
+						return true
+					}
+				case "tool_result":
+					inner := block.Get("content")
+					if inner.IsArray() {
+						for _, b := range inner.Array() {
+							if b.Get("type").String() == "advisor_redacted_result" {
+								return true
+							}
+						}
+					} else if inner.IsObject() {
+						if inner.Get("type").String() == "advisor_redacted_result" {
+							return true
+						}
+					}
+				}
+			}
+		} else if content.IsObject() {
+			blockType := content.Get("type").String()
+			if blockType == "advisor_tool_result" || blockType == "advisor_redacted_result" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func insertClaudeMidConversationSystemMessages(payload []byte, texts []string) []byte {
@@ -1270,39 +1389,18 @@ func applyCloakingInternal(
 	isSubagent := false
 	prevReq := ""
 	promptID := ""
+	var incomingHeaders http.Header
 	if !isProbeOrHelper {
-		incomingHeaders := resolveIncomingClaudeHeaders(ctx, helps.IncomingHeadersFromContext(ctx))
+		incomingHeaders = resolveIncomingClaudeHeaders(ctx, helps.IncomingHeadersFromContext(ctx))
 		isSubagent = helps.IsClaudeSubagentRequest(incomingHeaders, payload)
 		existingPrevReq, existingPromptID := helps.ExtractClaudeBillingTags(payload)
 
-		sessionID := helps.ClaudeSessionIDFromContext(ctx)
-		if sessionID == "" && auth != nil {
-			sessionID = helps.ClaudeAgentSessionUUIDForRequest(incomingHeaders, payload, payload, confirmedClaudeCode)
-		}
-
-		if sessionID != "" && auth != nil {
-			credIdentity := claudeDiagnosticsCredentialIdentity(auth)
-			isNewTurn := helps.IsClaudeNewPromptTurn(payload)
-			continuityKey, seq, prevMsgID, storedPrevReq, storedPromptID := helps.BeginClaudeContinuity(credIdentity, sessionID, isNewTurn, existingPromptID)
-
-			if existingPromptID != "" {
-				promptID = existingPromptID
-			} else {
-				promptID = storedPromptID
-			}
-			if storedPrevReq != "" {
-				prevReq = storedPrevReq
-			} else {
-				prevReq = existingPrevReq
-			}
-
+		var cCtx helps.ClaudeContinuityContext
+		var ok bool
+		prevReq, promptID, cCtx, ok = resolveClaudeContinuityTags(ctx, auth, incomingHeaders, payload, confirmedClaudeCode, existingPrevReq, existingPromptID)
+		if ok {
 			if continuityCtx := helps.ClaudeContinuityContextFromContext(ctx); continuityCtx != nil {
-				continuityCtx.Key = continuityKey
-				continuityCtx.Sequence = seq
-				continuityCtx.PreviousMessageID = prevMsgID
-				continuityCtx.PreviousRequestID = prevReq
-				continuityCtx.PromptID = promptID
-				continuityCtx.Initialized = true
+				*continuityCtx = cCtx
 			}
 		}
 	}
@@ -1335,9 +1433,10 @@ func applyCloakingInternal(
 		}
 	}
 
-	// Probes and subagents never use 1h cache in native Claude Code; ensure any
-	// caller-supplied 1h ttl is stripped to match extended-cache-ttl beta suppression.
-	if isSubagent || isProbeOrHelper {
+	// Probes never use 1h cache in native Claude Code; ensure any caller-supplied
+	// 1h ttl is stripped to match extended-cache-ttl beta suppression. Subagents
+	// preserve caller-requested 1h cache TTL (e.g. subagentPromptCacheTtl: 1h).
+	if isProbeOrHelper || (isSubagent && !helps.ClaudeSubagentRequests1h(incomingHeaders, payload)) {
 		payload = stripClaudeCacheControlTTL(payload)
 	}
 
